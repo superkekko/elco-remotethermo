@@ -15,6 +15,7 @@ from .entity import (
     async_refresh_after_set,
     is_entity_description_available,
 )
+from .menu_settings import build_menu_entities
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ async def async_setup_entry(
             else:
                 ariston_numbers.append(AristonNumber(coordinator, description))
 
+    ariston_numbers.extend(build_menu_entities(hass, entry, "number"))
     async_add_entities(ariston_numbers)
 
 

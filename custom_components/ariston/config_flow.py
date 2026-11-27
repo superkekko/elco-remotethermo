@@ -18,6 +18,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import callback
 
+from .consumption import DEFAULT_GAS_KWH_PER_SMC, GAS_KWH_PER_SMC
 from .const import (
     API_URL_SETTING,
     API_USER_AGENT,
@@ -179,6 +180,8 @@ class AristonOptionsFlow(config_entries.OptionsFlow):
             BUS_ERRORS_SCAN_INTERVAL, DEFAULT_BUS_ERRORS_SCAN_INTERVAL_SECONDS
         )
 
+        gas_kwh_per_smc = options.get(GAS_KWH_PER_SMC, DEFAULT_GAS_KWH_PER_SMC)
+
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
@@ -195,6 +198,10 @@ class AristonOptionsFlow(config_entries.OptionsFlow):
                         BUS_ERRORS_SCAN_INTERVAL,
                         default=bus_errors_scan_interval,
                     ): int,
+                    vol.Optional(
+                        GAS_KWH_PER_SMC,
+                        default=gas_kwh_per_smc,
+                    ): vol.All(vol.Coerce(float), vol.Range(min=5, max=15)),
                 }
             ),
             last_step=True,

@@ -9,9 +9,11 @@ from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
+from .consumption import ARISTON_CONSUMPTION_SENSOR_TYPES
 from .const import ARISTON_SENSOR_TYPES, AristonSensorEntityDescription
 from .coordinator import DeviceDataUpdateCoordinator
 from .entity import AristonEntity, register_supported_entities
+from .extra_data import ARISTON_EXTRA_SENSOR_TYPES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,9 +25,13 @@ async def async_setup_entry(
     register_supported_entities(
         hass,
         entry,
-        ARISTON_SENSOR_TYPES,
-        lambda coordinator, description, _zone=0: AristonSensor(
-            coordinator, description
+        [
+            *ARISTON_SENSOR_TYPES,
+            *ARISTON_CONSUMPTION_SENSOR_TYPES,
+            *ARISTON_EXTRA_SENSOR_TYPES,
+        ],
+        lambda coordinator, description, zone=0: AristonSensor(
+            coordinator, description, zone
         ),
         async_add_entities,
     )
@@ -38,9 +44,10 @@ class AristonSensor(AristonEntity, SensorEntity):
         self,
         coordinator: DeviceDataUpdateCoordinator,
         description: AristonSensorEntityDescription,
+        zone: int = 0,
     ) -> None:
         """Initialize the entity."""
-        super().__init__(coordinator, description)
+        super().__init__(coordinator, description, zone)
 
     @property
     def native_value(self):

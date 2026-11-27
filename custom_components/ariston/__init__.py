@@ -7,6 +7,7 @@ import logging
 import voluptuous as vol
 
 from ariston import Ariston, DeviceAttribute, SystemType
+from ariston.ariston_api import ConnectionException
 from ariston.const import ARISTON_API_URL, ARISTON_USER_AGENT
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
@@ -19,7 +20,11 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers import config_validation as cv, device_registry as dr
+from homeassistant.helpers import (
+    config_validation as cv,
+    device_registry as dr,
+    entity_registry as er,
+)
 from homeassistant.util.unit_system import METRIC_SYSTEM
 
 from .const import (
@@ -33,9 +38,20 @@ from .const import (
     DEFAULT_SCAN_INTERVAL_SECONDS,
     DOMAIN,
     ENERGY_COORDINATOR,
+    EXTRA_COORDINATOR,
     ENERGY_SCAN_INTERVAL,
 )
+from .consumption import (
+    DEFAULT_GAS_KWH_PER_SMC,
+    GAS_KWH_PER_SMC,
+    LEGACY_GALEVO_ONLY_NAMES,
+    LEGACY_SENSOR_NAMES,
+    EnergyDataUpdateCoordinator,
+)
 from .coordinator import DeviceDataUpdateCoordinator
+from .extra_data import MENU_ITEM_IDS, ExtraDataUpdateCoordinator
+from .menu_settings import LEGACY_MENU_NAMES, MENU_SETTINGS
+from .resolver_fix import apply_system_resolver
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -66,6 +82,10 @@ SET_ITEM_BY_ID_SCHEMA = vol.Schema(
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Ariston from a config entry."""
+    # Avoid sporadic aiodns/c-ares "Timeout while contacting DNS servers".
+    # Remove this line to go back to the library's default resolver.
+    apply_system_resolver()
+
     ariston = Ariston()
     try:
         api_url_setting = entry.data.get(API_URL_SETTING, ARISTON_API_URL)
@@ -107,7 +127,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
         hass.data.setdefault(DOMAIN, {}).setdefault(
-            entry.unique_id, {COORDINATOR: {}, ENERGY_COORDINATOR: {}}
+            entry.unique_id,
+            {COORDINATOR: {}, ENERGY_COORDINATOR: {}, EXTRA_COORDINATOR: {}},
         )
         hass.data[DOMAIN][entry.unique_id][COORDINATOR] = coordinator
 
@@ -133,16 +154,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             energy_interval_minutes = entry.options.get(
                 ENERGY_SCAN_INTERVAL, DEFAULT_ENERGY_SCAN_INTERVAL_MINUTES
             )
-            energy_coordinator = DeviceDataUpdateCoordinator(
+            energy_coordinator = EnergyDataUpdateCoordinator(
                 hass,
                 device,
                 energy_interval_minutes * 60,
                 ENERGY_COORDINATOR,
-                device.async_update_energy,
+                entry.options.get(GAS_KWH_PER_SMC, DEFAULT_GAS_KWH_PER_SMC),
                 config_entry=entry,
             )
             hass.data[DOMAIN][entry.unique_id][ENERGY_COORDINATOR] = energy_coordinator
+            # Energy data is optional: do not block setup if it fails.
+            await energy_coordinator.async_load_lifetime()
             await energy_coordinator.async_refresh()
+
+        if device.system_type == SystemType.GALEVO:
+            # Extra menu items / plantData. Optional: never blocks the setup.
+            extra_coordinator = ExtraDataUpdateCoordinator(
+                hass,
+                device,
+                scan_interval_seconds,
+                EXTRA_COORDINATOR,
+                api_url_setting,
+                MENU_ITEM_IDS,
+                [setting.portal_id for setting in MENU_SETTINGS],
+                config_entry=entry,
+            )
+            hass.data[DOMAIN][entry.unique_id][EXTRA_COORDINATOR] = extra_coordinator
+            await extra_coordinator.async_refresh()
+
+        _remove_legacy_consumption_sensors(
+            hass, entry, device.gateway, device.system_type == SystemType.GALEVO
+        )
 
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -174,13 +216,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 async_set_item_by_id_service,
                 schema=SET_ITEM_BY_ID_SCHEMA,
             )
-    except ConfigEntryAuthFailed:
+    except (ConfigEntryAuthFailed, ConfigEntryNotReady):
         raise
+    except ConnectionException as error:
+        # Cloud/network problem: Home Assistant retries with backoff, no traceback.
+        raise ConfigEntryNotReady(
+            f"Ariston cloud not reachable: {error!r}"
+        ) from error
     except Exception as error:
-        _LOGGER.exception("")
+        _LOGGER.exception("Unexpected error setting up Ariston")
         raise ConfigEntryNotReady from error
 
     return True
+
+
+def _remove_legacy_consumption_sensors(
+    hass: HomeAssistant, entry: ConfigEntry, gateway: str, galevo: bool = True
+) -> None:
+    """Remove the old (wrong) consumption sensors, replaced by consumption.py."""
+    registry = er.async_get(hass)
+    names = [*LEGACY_SENSOR_NAMES, *(LEGACY_GALEVO_ONLY_NAMES if galevo else [])]
+    legacy_ids = {f"{gateway}-{name}" for name in names}
+    legacy_menu_ids = {f"{gateway}-{name}" for name in LEGACY_MENU_NAMES}
+    for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if (entity.domain == Platform.SENSOR and entity.unique_id in legacy_ids) or (
+            entity.domain
+            in (Platform.NUMBER, Platform.SWITCH, Platform.SELECT)
+            and entity.unique_id in legacy_menu_ids
+        ):
+            _LOGGER.info("Removing legacy consumption sensor %s", entity.entity_id)
+            registry.async_remove(entity.entity_id)
 
 
 async def update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:

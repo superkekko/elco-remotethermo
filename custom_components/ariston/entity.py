@@ -38,6 +38,7 @@ def is_entity_description_available(
             description.system_types,
             description.whe_types,
         )
+        and coordinator.provides(description)
     )
 
 

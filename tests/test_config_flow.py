@@ -12,6 +12,10 @@ from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant.common import MockConfigEntry
 
 import custom_components.ariston as ariston_integration
+from custom_components.ariston.consumption import (
+    DEFAULT_GAS_KWH_PER_SMC,
+    GAS_KWH_PER_SMC,
+)
 from custom_components.ariston import config_flow
 from custom_components.ariston.const import (
     API_URL_SETTING,
@@ -195,12 +199,14 @@ async def test_options_flow_uses_defaults_and_saves_values(hass):
         "scan_interval": DEFAULT_SCAN_INTERVAL_SECONDS,
         ENERGY_SCAN_INTERVAL: DEFAULT_ENERGY_SCAN_INTERVAL_MINUTES,
         BUS_ERRORS_SCAN_INTERVAL: DEFAULT_BUS_ERRORS_SCAN_INTERVAL_SECONDS,
+        GAS_KWH_PER_SMC: DEFAULT_GAS_KWH_PER_SMC,
     }
 
     options = {
         "scan_interval": 120,
         ENERGY_SCAN_INTERVAL: 30,
         BUS_ERRORS_SCAN_INTERVAL: 900,
+        GAS_KWH_PER_SMC: 10.2,
     }
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], options

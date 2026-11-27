@@ -17,6 +17,7 @@ from homeassistant.const import ATTR_DEVICE_ID
 from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant.common import MockConfigEntry
 
+from custom_components.ariston.menu_settings import _MenuBase
 from custom_components.ariston import (
     binary_sensor,
     climate,
@@ -92,7 +93,7 @@ async def test_platforms_add_supported_entities_and_expand_zones(
             hass, entry, add_entities
         )
         assert added
-        assert all(isinstance(entity, entity_type) for entity in added)
+        assert all(isinstance(entity, (entity_type, _MenuBase)) for entity in added)
         added_by_platform[platform_name] = added
 
     assert len(added_by_platform["climate"]) == 2

@@ -39,6 +39,13 @@ But it does not use Ariston website. It uses Ariston API what I reversed enginee
 | Less sensors, switches, etc |  More sensors, switches, etc |
 | New code, may contains lot of bugs | Old, tested code |
 
+## Fork additions (Galevo / Elco hybrid)
+
+- **Consumption sensors** (Galevo): electricity and gas for heating and hot water, for *today*, *yesterday*, *last 30 days* and *last month*, plus totals and "since start" lifetime counters (persisted locally, the cloud keeps only ~21 months). Gas is shown in m³ (Smc) with the kWh value as attribute; the kWh/Smc factor is an option (default 10.69). The old, wrong consumption sensors are removed automatically.
+- **Extra read-only sensors** from the cloud menu items / plant data, and a *heating flow offset* sensor.
+- **Writable menu settings** (written through `dataItems/set` with the portal id, e.g. `U6_15_2`): PV DHW delta, automatic winter mode, thermal sanitization, tank charge mode, energy manager logic. Only 6.15.2 was verified on a real system; the others are assumed and shown with a `source` attribute (`cloud`, `last written`, `initial (assumed)`).
+- DNS: the library uses the system resolver to avoid c-ares timeouts; cloud errors (HTTP 500) become `UpdateFailed` instead of tracebacks.
+
 ## TODO
 - Localization. Avaliable in english, catalan, italian, russian and ukranian.
 - More sensors, switches, binary sersors, selectors, services.

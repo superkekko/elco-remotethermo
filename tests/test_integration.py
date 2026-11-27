@@ -62,6 +62,7 @@ from custom_components.ariston.const import (
     DEFAULT_BUS_ERRORS_SCAN_INTERVAL_SECONDS,
     DEFAULT_SCAN_INTERVAL_SECONDS,
     ENERGY_COORDINATOR,
+    EXTRA_COORDINATOR,
     ENERGY_SCAN_INTERVAL,
 )
 from custom_components.ariston.sensor import AristonSensor
@@ -129,7 +130,12 @@ async def test_setup_creates_coordinators_and_unload_removes_entry_data(
     assert await async_setup_entry(hass, entry)
 
     coordinators = hass.data[DOMAIN][entry.unique_id]
-    assert set(coordinators) == {COORDINATOR, BUS_ERRORS_COORDINATOR, ENERGY_COORDINATOR}
+    assert set(coordinators) == {
+        COORDINATOR,
+        BUS_ERRORS_COORDINATOR,
+        ENERGY_COORDINATOR,
+        EXTRA_COORDINATOR,
+    }
     assert coordinators[COORDINATOR].update_interval.total_seconds() == 120
     assert coordinators[BUS_ERRORS_COORDINATOR].update_interval.total_seconds() == 900
     assert coordinators[ENERGY_COORDINATOR].update_interval.total_seconds() == 1800
@@ -465,6 +471,7 @@ async def test_setup_skips_energy_coordinator_when_device_has_no_metering(
         COORDINATOR,
         BUS_ERRORS_COORDINATOR,
         ENERGY_COORDINATOR,
+        EXTRA_COORDINATOR,
     }
     assert coordinators[ENERGY_COORDINATOR] == {}
     assert coordinators[COORDINATOR].update_interval.total_seconds() == (

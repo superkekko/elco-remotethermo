@@ -148,30 +148,6 @@ def test_number_exposes_static_limits(coordinator):
     assert entity.native_step == 0.5
 
 
-def test_dhw_total_energy_reports_daily_sum_and_reset_time(
-    coordinator, ariston_device
-):
-    ariston_device.consumptions_sequences = [
-        {
-            "k": ConsumptionType.DOMESTIC_HOT_WATER_TOTAL_ENERGY.value,
-            "p": ConsumptionTimeInterval.LAST_DAY.value,
-            "v": [0.0, 0.72, 0.0, 1.15, 0.0],
-        }
-    ]
-    ariston_device.consumption_sequence_last_changed_utc = datetime(
-        2025, 1, 2, 11, tzinfo=timezone.utc
-    )
-    description = next(
-        description
-        for description in ARISTON_SENSOR_TYPES
-        if description.key == "Domestic hot water total energy consumption"
-    )
-    entity = AristonSensor(coordinator, description)
-
-    assert entity.native_value == 1.87
-    assert entity.last_reset == dt_util.start_of_local_day()
-
-
 def test_dhw_program_temperature_sensors_use_distinct_source_values(
     coordinator, ariston_device
 ):

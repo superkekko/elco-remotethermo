@@ -15,6 +15,7 @@ from .entity import (
     async_refresh_after_set,
     is_entity_description_available,
 )
+from .menu_settings import build_menu_entities
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ async def async_setup_entry(
                 )
             )
 
+    ariston_select.extend(build_menu_entities(hass, entry, "select"))
     async_add_entities(ariston_select)
 
 

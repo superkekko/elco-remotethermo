@@ -6,10 +6,9 @@ import sys
 from typing import Any, Final
 
 from ariston.const import (
+    ConsumptionType,
     ARISTON_BUS_ERRORS,
     ConsumptionProperties,
-    ConsumptionTimeInterval,
-    ConsumptionType,
     CustomDeviceFeatures,
     DeviceAttribute,
     DeviceFeatures,
@@ -29,7 +28,7 @@ from ariston.const import (
 )
 from homeassistant.components.binary_sensor import BinarySensorEntityDescription
 from homeassistant.components.climate import ClimateEntityDescription
-from homeassistant.components.number import NumberEntityDescription
+from homeassistant.components.number import NumberEntityDescription, NumberMode
 from homeassistant.components.select import SelectEntityDescription
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -39,7 +38,6 @@ from homeassistant.components.sensor import (
 from homeassistant.components.switch import SwitchEntityDescription
 from homeassistant.const import UnitOfEnergy, UnitOfTemperature, UnitOfTime
 from homeassistant.helpers.entity import EntityCategory, EntityDescription
-from homeassistant.util import dt as dt_util
 
 try:
     from homeassistant.components.water_heater import WaterHeaterEntityDescription
@@ -57,6 +55,7 @@ COORDINATOR: Final[str] = "coordinator"
 ENERGY_COORDINATOR: Final[str] = "energy_coordinator"
 ENERGY_SCAN_INTERVAL: Final[str] = "energy_scan_interval"
 BUS_ERRORS_COORDINATOR: Final[str] = "bus_errors_coordinator"
+EXTRA_COORDINATOR: Final[str] = "extra_coordinator"
 BUS_ERRORS_SCAN_INTERVAL: Final[str] = "bus_errors_scan_interval"
 API_URL_SETTING: Final[str] = "api_url_setting"
 API_USER_AGENT: Final[str] = "api_user_agent"
@@ -105,24 +104,6 @@ def _get_dhw_flame(entity: Any) -> bool:
     )
 
 
-def _get_dhw_total_energy_today(entity: Any) -> float | None:
-    """Sum the hourly DHW energy readings for today."""
-    for sequence in entity.device.consumptions_sequences:
-        if (
-            sequence.get("k") == ConsumptionType.DOMESTIC_HOT_WATER_TOTAL_ENERGY.value
-            and sequence.get("p") == ConsumptionTimeInterval.LAST_DAY.value
-        ):
-            values = sequence.get("v") or []
-            return round(sum(values), 3) if values else None
-
-    return None
-
-
-def _get_local_day_start(_entity: Any) -> dt.datetime:
-    """Return the local midnight when today's energy total started."""
-    return dt_util.start_of_local_day()
-
-
 @dataclass(kw_only=True, frozen=True)
 class AristonBaseEntityDescription(EntityDescription):
     """An abstract class that describes Ariston entites."""
@@ -133,6 +114,11 @@ class AristonBaseEntityDescription(EntityDescription):
     system_types: list[SystemType] | None = None
     whe_types: list[WheType] | None = None
     zone: bool = False
+    # Only for entities fed by the extra coordinator (see extra_data.py): the
+    # entity is created only if the cloud actually returns this menu item /
+    # plantData key.
+    required_menu_item: int | None = None
+    required_plant_key: str | None = None
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -436,6 +422,17 @@ ARISTON_SENSOR_TYPES: list[AristonSensorEntityDescription] = [
         system_types=[SystemType.GALEVO],
     ),
     AristonSensorEntityDescription(
+        key=DeviceProperties.DHW_STORAGE_TEMPERATURE,
+        name=f"{NAME} DHW storage temp",
+        icon="mdi:water-thermometer",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        device_features=[DeviceProperties.DHW_STORAGE_TEMPERATURE],
+        get_native_value=lambda entity: entity.device.water_heater_current_temperature,
+        get_native_unit_of_measurement=lambda entity: entity.device.water_heater_temperature_unit,
+        system_types=[SystemType.GALEVO],
+    ),
+    AristonSensorEntityDescription(
         key=DeviceProperties.OUTSIDE_TEMP,
         name=f"{NAME} Outside temp",
         device_class=SensorDeviceClass.TEMPERATURE,
@@ -464,112 +461,16 @@ ARISTON_SENSOR_TYPES: list[AristonSensorEntityDescription] = [
         ],
     ),
     AristonSensorEntityDescription(
-        key="Gas consumption for heating last month",
-        name=f"{NAME} gas consumption for heating last month",
-        icon="mdi:cash",
+        key=f"{ThermostatProperties.HEATING_FLOW_OFFSET}_sensor",
+        name=f"{NAME} heating flow offset value",
+        icon="mdi:thermometer-plus",
         entity_category=EntityCategory.DIAGNOSTIC,
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_features=[DeviceFeatures.HAS_METERING],
-        coordinator=ENERGY_COORDINATOR,
-        get_native_value=lambda entity: entity.device.gas_consumption_for_heating_last_month,
+        state_class=SensorStateClass.MEASUREMENT,
+        zone=True,
         system_types=[SystemType.GALEVO],
-    ),
-    AristonSensorEntityDescription(
-        key="Electricity consumption for heating last month",
-        name=f"{NAME} electricity consumption for heating last month",
-        icon="mdi:cash",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_features=[DeviceFeatures.HAS_METERING],
-        coordinator=ENERGY_COORDINATOR,
-        get_native_value=lambda entity: entity.device.electricity_consumption_for_heating_last_month,
-        system_types=[SystemType.GALEVO],
-    ),
-    AristonSensorEntityDescription(
-        key="Electricity consumption for cooling last month",
-        name=f"{NAME} electricity consumption for cooling last month",
-        icon="mdi:cash",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_features=[DeviceFeatures.HAS_METERING, DeviceAttribute.HPMP_SYS],
-        coordinator=ENERGY_COORDINATOR,
-        get_native_value=lambda entity: entity.device.electricity_consumption_for_cooling_last_month,
-        system_types=[SystemType.GALEVO],
-    ),
-    AristonSensorEntityDescription(
-        key="Gas consumption for water last month",
-        name=f"{NAME} gas consumption for water last month",
-        icon="mdi:cash",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_features=[DeviceFeatures.HAS_METERING, CustomDeviceFeatures.HAS_DHW],
-        coordinator=ENERGY_COORDINATOR,
-        get_native_value=lambda entity: entity.device.gas_consumption_for_water_last_month,
-        system_types=[SystemType.GALEVO],
-    ),
-    AristonSensorEntityDescription(
-        key="Electricity consumption for water last month",
-        name=f"{NAME} electricity consumption for water last month",
-        icon="mdi:cash",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_features=[DeviceFeatures.HAS_METERING, CustomDeviceFeatures.HAS_DHW],
-        coordinator=ENERGY_COORDINATOR,
-        get_native_value=lambda entity: entity.device.electricity_consumption_for_water_last_month,
-        system_types=[SystemType.GALEVO],
-    ),
-    AristonSensorEntityDescription(
-        key="Central heating total energy consumption",
-        name=f"{NAME} central heating total energy consumption",
-        icon="mdi:cash",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        state_class=SensorStateClass.TOTAL,
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_features=[
-            DeviceFeatures.HAS_METERING,
-            ConsumptionType.CENTRAL_HEATING_TOTAL_ENERGY.name,
-        ],
-        coordinator=ENERGY_COORDINATOR,
-        get_native_value=lambda entity: entity.device.central_heating_total_energy_consumption,
-        get_last_reset=lambda entity: entity.device.consumption_sequence_last_changed_utc,
-    ),
-    AristonSensorEntityDescription(
-        key="Domestic hot water total energy consumption",
-        name=f"{NAME} domestic hot water total energy consumption",
-        icon="mdi:cash",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        state_class=SensorStateClass.TOTAL,
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_features=[
-            DeviceFeatures.HAS_METERING,
-            ConsumptionType.DOMESTIC_HOT_WATER_TOTAL_ENERGY.name,
-        ],
-        coordinator=ENERGY_COORDINATOR,
-        get_native_value=_get_dhw_total_energy_today,
-        get_last_reset=_get_local_day_start,
-    ),
-    AristonSensorEntityDescription(
-        key="Central heating gas consumption",
-        name=f"{NAME} central heating gas consumption",
-        icon="mdi:cash",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        state_class=SensorStateClass.TOTAL,
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_features=[
-            DeviceFeatures.HAS_METERING,
-            ConsumptionType.CENTRAL_HEATING_GAS.name,
-        ],
-        coordinator=ENERGY_COORDINATOR,
-        get_native_value=lambda entity: entity.device.central_heating_gas_consumption,
-        get_last_reset=lambda entity: entity.device.consumption_sequence_last_changed_utc,
+        get_native_value=lambda entity: entity.device.get_heating_flow_offset_value(
+            entity.zone
+        ),
     ),
     AristonSensorEntityDescription(
         key="Domestic hot water heating pump electricity consumption",
@@ -583,6 +484,7 @@ ARISTON_SENSOR_TYPES: list[AristonSensorEntityDescription] = [
             DeviceFeatures.HAS_METERING,
             ConsumptionType.DOMESTIC_HOT_WATER_HEATING_PUMP_ELECTRICITY.name,
         ],
+        system_types=[SystemType.VELIS],
         coordinator=ENERGY_COORDINATOR,
         get_native_value=lambda entity: entity.device.domestic_hot_water_heating_pump_electricity_consumption,
         get_last_reset=lambda entity: entity.device.consumption_sequence_last_changed_utc,
@@ -599,56 +501,9 @@ ARISTON_SENSOR_TYPES: list[AristonSensorEntityDescription] = [
             DeviceFeatures.HAS_METERING,
             ConsumptionType.DOMESTIC_HOT_WATER_RESISTOR_ELECTRICITY.name,
         ],
+        system_types=[SystemType.VELIS],
         coordinator=ENERGY_COORDINATOR,
         get_native_value=lambda entity: entity.device.domestic_hot_water_resistor_electricity_consumption,
-        get_last_reset=lambda entity: entity.device.consumption_sequence_last_changed_utc,
-    ),
-    AristonSensorEntityDescription(
-        key="Domestic hot water gas consumption",
-        name=f"{NAME} domestic hot water gas consumption",
-        icon="mdi:cash",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        state_class=SensorStateClass.TOTAL,
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_features=[
-            DeviceFeatures.HAS_METERING,
-            ConsumptionType.DOMESTIC_HOT_WATER_GAS.name,
-        ],
-        coordinator=ENERGY_COORDINATOR,
-        get_native_value=lambda entity: entity.device.domestic_hot_water_gas_consumption,
-        get_last_reset=lambda entity: entity.device.consumption_sequence_last_changed_utc,
-    ),
-    AristonSensorEntityDescription(
-        key="Central heating electricity consumption",
-        name=f"{NAME} central heating electricity consumption",
-        icon="mdi:cash",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        state_class=SensorStateClass.TOTAL,
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_features=[
-            DeviceFeatures.HAS_METERING,
-            ConsumptionType.CENTRAL_HEATING_ELECTRICITY.name,
-        ],
-        coordinator=ENERGY_COORDINATOR,
-        get_native_value=lambda entity: entity.device.central_heating_electricity_consumption,
-        get_last_reset=lambda entity: entity.device.consumption_sequence_last_changed_utc,
-    ),
-    AristonSensorEntityDescription(
-        key="Domestic hot water electricity consumption",
-        name=f"{NAME} domestic hot water electricity consumption",
-        icon="mdi:cash",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        state_class=SensorStateClass.TOTAL,
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_features=[
-            DeviceFeatures.HAS_METERING,
-            ConsumptionType.DOMESTIC_HOT_WATER_ELECTRICITY.name,
-        ],
-        coordinator=ENERGY_COORDINATOR,
-        get_native_value=lambda entity: entity.device.domestic_hot_water_electricity_consumption,
         get_last_reset=lambda entity: entity.device.consumption_sequence_last_changed_utc,
     ),
     AristonSensorEntityDescription(
@@ -979,7 +834,8 @@ ARISTON_NUMBER_TYPES: list[AristonNumberEntityDescription] = [
     AristonNumberEntityDescription(
         key=ConsumptionProperties.ELEC_COST,
         name=f"{NAME} elec cost",
-        icon="mdi:currency-sign",
+        icon="mdi:flash-circle",
+        mode=NumberMode.BOX,
         entity_category=EntityCategory.CONFIG,
         native_min_value=0,
         native_max_value=sys.maxsize,
@@ -995,7 +851,8 @@ ARISTON_NUMBER_TYPES: list[AristonNumberEntityDescription] = [
     AristonNumberEntityDescription(
         key=ConsumptionProperties.GAS_COST,
         name=f"{NAME} gas cost",
-        icon="mdi:currency-sign",
+        icon="mdi:fire-circle",
+        mode=NumberMode.BOX,
         entity_category=EntityCategory.CONFIG,
         native_min_value=0,
         native_max_value=sys.maxsize,
@@ -1060,6 +917,7 @@ ARISTON_NUMBER_TYPES: list[AristonNumberEntityDescription] = [
         key=ThermostatProperties.HEATING_FLOW_TEMP,
         name=f"{NAME} heating flow temperature",
         icon="mdi:thermometer",
+        mode=NumberMode.BOX,
         entity_category=EntityCategory.CONFIG,
         zone=True,
         get_native_min_value=lambda entity: entity.device.get_heating_flow_temp_min(
@@ -1082,6 +940,7 @@ ARISTON_NUMBER_TYPES: list[AristonNumberEntityDescription] = [
         key=ThermostatProperties.HEATING_FLOW_OFFSET,
         name=f"{NAME} heating flow offset",
         icon="mdi:progress-wrench",
+        mode=NumberMode.BOX,
         entity_category=EntityCategory.CONFIG,
         zone=True,
         get_native_min_value=lambda entity: entity.device.get_heating_flow_offset_min(

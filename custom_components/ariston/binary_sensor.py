@@ -22,6 +22,7 @@ from .const import (
 )
 from .coordinator import DeviceDataUpdateCoordinator
 from .entity import AristonEntity, register_supported_entities
+from .extra_data import ARISTON_EXTRA_BINARY_SENSOR_TYPES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ async def async_setup_entry(
     register_supported_entities(
         hass,
         entry,
-        ARISTON_BINARY_SENSOR_TYPES,
+        [*ARISTON_BINARY_SENSOR_TYPES, *ARISTON_EXTRA_BINARY_SENSOR_TYPES],
         lambda coordinator, description, zone=0: AristonBinarySensor(
             coordinator, description, zone
         ),
